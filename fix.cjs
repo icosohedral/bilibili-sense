@@ -1,6 +1,9 @@
 const fs = require('fs')
 const path = require('path')
 
+const distDir = path.join(__dirname, 'dist')
+const publicLocalesDir = path.join(__dirname, 'public', '_locales')
+const distLocalesDir = path.join(distDir, '_locales')
 const manifestPath = path.join(__dirname, 'dist', 'manifest.json')
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
 
@@ -48,3 +51,7 @@ if (normalized.length === 0) {
 manifest.web_accessible_resources = normalized
 
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+if (fs.existsSync(publicLocalesDir)) {
+  fs.cpSync(publicLocalesDir, distLocalesDir, {recursive: true})
+}

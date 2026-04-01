@@ -20,7 +20,6 @@ interface TranscriptItem {
 }
 
 interface AiDetectSettings {
-  enabled: boolean
   apiUrl: string
   apiKey: string
   model: string

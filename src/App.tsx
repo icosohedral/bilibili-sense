@@ -12,7 +12,6 @@ type SubtitleInfo = {
 
 const AI_DETECT_SETTINGS_KEY = 'bilibili-subtitle-ai-detect-settings'
 const defaultAiDetectSettings: AiDetectSettings = {
-  enabled: false,
   apiUrl: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-4.1-mini',
@@ -68,7 +67,6 @@ const App = () => {
       }
       const parsed = JSON.parse(raw)
       setAiDetectSettings({
-        enabled: Boolean(parsed.enabled),
         apiUrl: typeof parsed.apiUrl === 'string' && parsed.apiUrl ? parsed.apiUrl : defaultAiDetectSettings.apiUrl,
         apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
         model: typeof parsed.model === 'string' && parsed.model ? parsed.model : defaultAiDetectSettings.model,
@@ -193,6 +191,14 @@ const App = () => {
     })
   }, [sendInject])
 
+  const openSettings = useCallback(() => {
+    if (collapsed) {
+      setCollapsed(false)
+      sendInject(null, 'FOLD', {fold: false}).catch(console.error)
+    }
+    setShowSettingsPanel(true)
+  }, [collapsed, sendInject])
+
   const onMove = useCallback((time: number) => {
     sendInject(null, 'MOVE', {time, togglePause: false}).catch(console.error)
   }, [sendInject])
@@ -223,16 +229,17 @@ const App = () => {
     }))
   }, [])
 
+  const hasDetectConfig = aiDetectSettings.apiUrl.trim() !== '' &&
+    aiDetectSettings.apiKey.trim() !== '' &&
+    aiDetectSettings.model.trim() !== ''
+
   const runAiDetect = useCallback(() => {
-    if (!aiDetectSettings.enabled) {
-      setAiDetectError('请先在设置中启用内容检测')
-      return
-    }
     if (!transcript) {
       setAiDetectError('当前没有可用于检测的字幕内容')
       return
     }
-    if (!aiDetectSettings.apiUrl.trim() || !aiDetectSettings.apiKey.trim() || !aiDetectSettings.model.trim()) {
+    if (!hasDetectConfig) {
+      setShowSettingsPanel(true)
       setAiDetectError('请先在设置中填写检测所需的 API URL、API Key 和模型')
       return
     }
@@ -248,17 +255,14 @@ const App = () => {
     }).finally(() => {
       setAiDetecting(false)
     })
-  }, [aiDetectSettings, title, transcript])
+  }, [aiDetectSettings, hasDetectConfig, title, transcript])
 
   const onDetectAi = useCallback(() => {
     runAiDetect()
   }, [runAiDetect])
 
   useEffect(() => {
-    if (!aiDetectSettings.enabled || !aiDetectSettings.autoDetect || !transcript || aiDetecting) {
-      return
-    }
-    if (!aiDetectSettings.apiUrl.trim() || !aiDetectSettings.apiKey.trim() || !aiDetectSettings.model.trim()) {
+    if (!aiDetectSettings.autoDetect || !transcript || aiDetecting || !hasDetectConfig) {
       return
     }
 
@@ -269,10 +273,10 @@ const App = () => {
 
     lastAutoDetectKeyRef.current = autoDetectKey
     runAiDetect()
-  }, [aiDetectSettings, aiDetecting, currentInfo?.subtitle_url, runAiDetect, transcript, url])
+  }, [aiDetectSettings.autoDetect, aiDetecting, currentInfo?.subtitle_url, hasDetectConfig, runAiDetect, transcript, url])
 
   const items = transcript?.body ?? []
-  const shouldShowDetectCard = aiDetectSettings.enabled || aiDetecting || Boolean(aiDetectError) || aiDetectResult != null
+  const shouldShowDetectCard = aiDetecting || Boolean(aiDetectError) || aiDetectResult != null
   const shouldShowDetectControls = aiDetectResult == null
 
   return (
@@ -286,7 +290,13 @@ const App = () => {
           {url && <div className="title-sub">{url}</div>}
         </div>
         <div className="header-actions">
-          <button className="ghost-button" onClick={() => setShowSettingsPanel(prev => !prev)} type="button">
+          <button className="ghost-button" onClick={() => {
+            if (showSettingsPanel) {
+              setShowSettingsPanel(false)
+            } else {
+              openSettings()
+            }
+          }} type="button">
             {showSettingsPanel ? '关闭设置' : '设置'}
           </button>
         </div>
@@ -297,7 +307,7 @@ const App = () => {
           {showSettingsPanel && (
             <div className="settings-card">
               <div className="settings-title">内容检测设置</div>
-              <div className="settings-desc">配置检测接口、模型，以及字幕列表和检测结果的显示方式。</div>
+              <div className="settings-desc">配置检测接口、模型，以及字幕列表和检测结果的显示方式。填写完成后即可直接使用内容检测。</div>
               <div className="detect-config">
                 <input
                   className="detect-input"
@@ -320,14 +330,6 @@ const App = () => {
                   type="text"
                   value={aiDetectSettings.model}
                 />
-                <label className="detect-toggle detect-subtoggle">
-                  <input
-                    checked={aiDetectSettings.enabled}
-                    onChange={event => updateAiDetectSettings({enabled: event.target.checked})}
-                    type="checkbox"
-                  />
-                  <span>启用内容检测</span>
-                </label>
                 <label className="detect-toggle detect-subtoggle">
                   <input
                     checked={aiDetectSettings.detailedExplanation}
@@ -366,7 +368,9 @@ const App = () => {
               {infos.length === 0 && <option value="">未检测到字幕</option>}
             </select>
             <div className="toolbar-actions">
-              <button className="ghost-button" onClick={onDetectAi} type="button">内容检测</button>
+              <button className="ghost-button" onClick={onDetectAi} type="button">
+                {hasDetectConfig ? '内容检测' : '配置检测'}
+              </button>
               <button className="ghost-button" disabled={!transcript} onClick={onDownloadTxt} type="button">TXT</button>
               <button className="ghost-button" disabled={!transcript} onClick={onDownloadJson} type="button">JSON</button>
             </div>
@@ -381,60 +385,58 @@ const App = () => {
               <div className="detect-desc">基于当前视频字幕，判断内容是否带有明显的吸引注意力、延长停留或影响行为的脚本化设计。</div>
             )}
 
-            {aiDetectSettings.enabled && (
-              <div className="detect-config">
-                {shouldShowDetectControls && (
-                  <>
-                    <div className="detect-config-summary">
-                      <div>接口地址：{aiDetectSettings.apiUrl || '未设置'}</div>
-                      <div>检测模型：{aiDetectSettings.model || '未设置'}</div>
-                      <div>自动检测：{aiDetectSettings.autoDetect ? '开启' : '关闭'}</div>
-                      <div>详细判断：{aiDetectSettings.detailedExplanation ? '显示' : '不显示'}</div>
-                      <div>字幕列表：{aiDetectSettings.showSubtitles ? '显示' : '隐藏'}</div>
-                    </div>
-                    <div className="detect-actions">
-                      <button className="ghost-button" disabled={aiDetecting || !transcript} onClick={onDetectAi} type="button">
-                        {aiDetecting && <span className="button-spinner" aria-hidden="true" />}
-                        {aiDetecting ? '检测中…' : '开始分析'}
-                      </button>
-                    </div>
-                  </>
-                )}
-                {aiDetectError && <div className="status-card detect-status">{aiDetectError}</div>}
-                {aiDetectResult && (
-                  <div className="detect-result">
-                    <div className="detect-result-head">
-                      <span className={`detect-badge ${aiDetectResult.isClickbaitStyle ? 'detect-badge-warn' : 'detect-badge-ok'}`}>
-                        {aiDetectResult.isClickbaitStyle ? '疑似注意力导向脚本' : '更像自然表达'}
-                      </span>
-                      <span className="detect-confidence">评分 {aiDetectResult.score}/18</span>
-                      <span className="detect-confidence">置信度 {aiDetectResult.confidence}%</span>
-                    </div>
-                    <div className="detect-summary">{aiDetectResult.summary}</div>
-                    {aiDetectResult.reasons.length > 0 && (
-                      <ul className="detect-reasons">
-                        {aiDetectResult.reasons.map(reason => (
-                          <li key={reason}>{reason}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {aiDetectResult.details.length > 0 && (
-                      <div className="detect-detail-list">
-                        {aiDetectResult.details.map(detail => (
-                          <div className="detect-detail-item" key={detail.name}>
-                            <div className="detect-detail-head">
-                              <span className="detect-detail-name">{detail.name}</span>
-                              <span className="detect-detail-score">{detail.score}/2</span>
-                            </div>
-                            <div className="detect-detail-judgement">{detail.judgement}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+            <div className="detect-config">
+              {shouldShowDetectControls && (
+                <>
+                  <div className="detect-config-summary">
+                    <div>接口地址：{aiDetectSettings.apiUrl || '未设置'}</div>
+                    <div>检测模型：{aiDetectSettings.model || '未设置'}</div>
+                    <div>自动检测：{aiDetectSettings.autoDetect ? '开启' : '关闭'}</div>
+                    <div>详细判断：{aiDetectSettings.detailedExplanation ? '显示' : '不显示'}</div>
+                    <div>字幕列表：{aiDetectSettings.showSubtitles ? '显示' : '隐藏'}</div>
                   </div>
-                )}
-              </div>
-            )}
+                  <div className="detect-actions">
+                    <button className="ghost-button" disabled={aiDetecting || !transcript} onClick={onDetectAi} type="button">
+                      {aiDetecting && <span className="button-spinner" aria-hidden="true" />}
+                      {aiDetecting ? '检测中…' : '开始分析'}
+                    </button>
+                  </div>
+                </>
+              )}
+              {aiDetectError && <div className="status-card detect-status">{aiDetectError}</div>}
+              {aiDetectResult && (
+                <div className="detect-result">
+                  <div className="detect-result-head">
+                    <span className={`detect-badge ${aiDetectResult.isClickbaitStyle ? 'detect-badge-warn' : 'detect-badge-ok'}`}>
+                      {aiDetectResult.isClickbaitStyle ? '疑似注意力导向脚本' : '更像自然表达'}
+                    </span>
+                    <span className="detect-confidence">评分 {aiDetectResult.score}/18</span>
+                    <span className="detect-confidence">置信度 {aiDetectResult.confidence}%</span>
+                  </div>
+                  <div className="detect-summary">{aiDetectResult.summary}</div>
+                  {aiDetectResult.reasons.length > 0 && (
+                    <ul className="detect-reasons">
+                      {aiDetectResult.reasons.map(reason => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {aiDetectResult.details.length > 0 && (
+                    <div className="detect-detail-list">
+                      {aiDetectResult.details.map(detail => (
+                        <div className="detect-detail-item" key={detail.name}>
+                          <div className="detect-detail-head">
+                            <span className="detect-detail-name">{detail.name}</span>
+                            <span className="detect-detail-score">{detail.score}/2</span>
+                          </div>
+                          <div className="detect-detail-judgement">{detail.judgement}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             </div>
           )}
 
